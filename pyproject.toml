@@ -1,0 +1,14 @@
+[project]
+name = "ocular"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.139.0",
+    "httpx2>=2.5.0",
+    "numpy>=2.5.1",
+    "pydantic>=2.13.4",
+    "python-multipart>=0.0.20",
+    "uvicorn>=0.50.0",
+]
