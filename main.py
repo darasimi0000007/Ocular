@@ -1,122 +1,55 @@
-import hashlib
-from typing import Any, Dict, List, Optional
-from uuid import uuid4
-
+from fastapi import FastAPI, UploadFile, Depends, HTTPException
 import uvicorn
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from sqlalchemy.orm import Session
+from celery.result import AsyncResult
+
+from database import get_db
+from celery_app import celery_app
+from face_service import next_faiss_id
+from schemas import TaskAccepted, TaskResult
+import tasks  # noqa: F401  (import registers tasks with celery_app)
+
 
 app = FastAPI(title="Ocular Face Detection API")
 
-registered_people: List[Dict[str, Any]] = []
 
+#enrolling a face
+@app.post("/persons/{person_id}/enroll", response_model=TaskAccepted)
+async def enroll(person_id: str, file: UploadFile, db: Session = Depends(get_db)):
+    image_bytes = await file.read()
 
-def build_face_signature(face_bytes: bytes) -> List[int]:
-    """Create a deterministic signature from image bytes.
+    # Allocate the id here (in the request/response cycle, against Postgres)
+    # rather than inside the worker, so the caller can reason about it
+    # deterministically and we avoid two workers racing on the same max().
+    faiss_id = next_faiss_id(db)
 
-    This placeholder implementation is intentionally simple so the API can be
-    exercised immediately. In production, replace it with an insightface-based
-    embedding pipeline such as RetinaFace + ArcFace.
-    """
-    digest = hashlib.sha256(face_bytes).digest()
-    return [int(byte) for byte in digest[:16]]
-
-
-def similarity_score(signature_a: List[int], signature_b: List[int]) -> float:
-    if not signature_a or not signature_b:
-        return 0.0
-    if len(signature_a) != len(signature_b):
-        return 0.0
-    matches = sum(1 for left, right in zip(signature_a, signature_b) if left == right)
-    return matches / len(signature_a)
-
-
-@app.get("/")
-async def read_root() -> Dict[str, str]:
-    return {"message": "Welcome to Ocular Face Detection API!"}
+    async_result = tasks.enroll_face.delay(person_id, image_bytes, faiss_id)
+    return TaskAccepted(task_id=async_result.id)
 
 
 
-
-@app.post("/persons/register")
-async def register_person(
-    external_id: str = Form(...),
-    display_name: str = Form(...),
-    email: Optional[str] = Form(None),
-    department: Optional[str] = Form(None),
-    role: Optional[str] = Form(None),
-    face_image: UploadFile = File(...),
-) -> Dict[str, Any]:
-    if not face_image.filename:
-        raise HTTPException(status_code=400, detail="A face image is required")
-
-    face_bytes = await face_image.read()
-    if not face_bytes:
-        raise HTTPException(status_code=400, detail="The uploaded face image is empty")
-
-    person_id = str(uuid4())
-    person_record = {
-        "person_id": person_id,
-        "external_id": external_id,
-        "display_name": display_name,
-        "email": email,
-        "department": department,
-        "role": role,
-        "face_signature": build_face_signature(face_bytes),
-        "face_image_name": face_image.filename,
-    }
-    registered_people.append(person_record)
-
-    return {
-        "status": "registered",
-        "person_id": person_id,
-        "person": person_record,
-    }
-
-
-@app.post("/persons/verify")
-async def verify_person(face_image: UploadFile = File(...)) -> Dict[str, Any]:
-    if not face_image.filename:
-        raise HTTPException(status_code=400, detail="A face image is required")
-
-    face_bytes = await face_image.read()
-    if not face_bytes:
-        raise HTTPException(status_code=400, detail="The uploaded face image is empty")
-
-    candidate_signature = build_face_signature(face_bytes)
-
-    best_match: Optional[Dict[str, Any]] = None
-    best_score = 0.0
-
-    for person in registered_people:
-        score = similarity_score(candidate_signature, person["face_signature"])
-        if score > best_score:
-            best_match = person
-            best_score = score
-
-    if best_match and best_score >= 0.85:
-        return {
-            "matched": True,
-            "score": round(best_score, 4),
-            "person": {
-                key: value
-                for key, value in best_match.items()
-                if key != "face_signature"
-            },
-        }
-
-    return {
-        "matched": False,
-        "score": round(best_score, 4),
-        "message": "No matching person was found in the registry",
-    }
-
-
-@app.get("/persons")
-async def list_people() -> Dict[str, Any]:
-    return {"count": len(registered_people), "people": registered_people}
+#recognizing a face
+@app.post("/recognize", response_model=TaskAccepted)
+async def recognize(file: UploadFile):
+    image_bytes = await file.read()
+    async_result = tasks.recognize_face.delay(image_bytes)
+    return TaskAccepted(task_id=async_result.id)
 
 
 
+#getting a completed task result
+@app.get("/tasks/{task_id}", response_model=TaskResult)
+async def get_task_result(task_id: str):
+    result = AsyncResult(task_id, app=celery_app)
+
+    if result.status == "FAILURE":
+        raise HTTPException(status_code=500, detail=str(result.result))
+
+    return TaskResult(
+        task_id=task_id,
+        status=result.status,
+        result=result.result if result.ready() else None,
+    )
 
 
 

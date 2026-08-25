@@ -1,20 +1,19 @@
-# face_service.py
-import numpy as np
-from errors import NoFaceDetectedError, MultipleFacesError
+"""
+face_service.py
+Small helpers that sit between the FastAPI route and the Celery task.
+Keeps id-allocation logic out of both the route and the worker task.
+"""
+
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from models import FaceEnrollment
 
 
-class FaceService:
-    def __init__(self, model_app):
-        self.app = model_app  # the FaceAnalysis instance from model_loader
-
-    def extract_embedding(self, image: np.ndarray, expect_single: bool = True) -> np.ndarray:
-        faces = self.app.get(image)  # runs detection + alignment + embedding internally
-
-        if len(faces) == 0:
-            raise NoFaceDetectedError("No face found in image")
-        if expect_single and len(faces) > 1:
-            raise MultipleFacesError(f"Expected 1 face, found {len(faces)}")
-
-        face = faces[0]
-        embedding = face.embedding  # 512-d vector, already L2-normalizable
-        return embedding / np.linalg.norm(embedding)  # normalize for cosine sim via FAISS IndexFlatIP
+def next_faiss_id(db: Session) -> int:
+    """
+    Simple monotonic allocator: max existing id + 1. Fine at portfolio
+    scale. At real scale you'd use a Postgres sequence to avoid a
+    race between two concurrent enrollments reading the same max().
+    """
+    current_max = db.query(func.max(FaceEnrollment.faiss_index_id)).scalar()
+    return (current_max or 0) + 1
