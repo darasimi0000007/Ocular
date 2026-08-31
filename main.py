@@ -8,9 +8,25 @@ from celery_app import celery_app
 from face_service import next_faiss_id
 from schemas import TaskAccepted, TaskResult
 import tasks  # noqa: F401  (import registers tasks with celery_app)
+from database import Base, engine
+from contextlib import asynccontextmanager
+
+#on event startup, create database tables
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Ensure the database tables are created on startup
+    Base.metadata.create_all(bind=engine)
+    yield
 
 
-app = FastAPI(title="Ocular Face Detection API")
+
+app = FastAPI(title="Ocular Face Detection API", lifespan = lifespan)
+
+
+@app.get("/")
+async def root():
+    return {"detail": "Ocular Face Detection API is running"}
+
 
 
 #enrolling a face

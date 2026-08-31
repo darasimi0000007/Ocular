@@ -23,7 +23,8 @@ class Person(Base):
     __tablename__ = "persons"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"))
-    full_name = Column(String, nullable=False)
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
 
     enrollments = relationship("FaceEnrollment", back_populates="person")
 

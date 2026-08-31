@@ -1,10 +1,4 @@
-"""
-tasks.py
-This is where FastAPI's request/response cycle hands off to a worker
-process. Nothing in here is imported/run inside the FastAPI process
-itself -- these functions execute inside separate Celery worker
-processes, picked up off the Redis queue.
-"""
+
 
 import cv2
 import numpy as np
@@ -15,28 +9,22 @@ from vector_store import vector_store
 from database import SessionLocal
 from models import FaceEnrollment, Person
 from config import settings
+from typing import Any, cast
 
 
 def _decode_image(image_bytes: bytes) -> np.ndarray:
     arr = np.frombuffer(image_bytes, dtype=np.uint8)
-    return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    return cast(Any, cv2.imdecode(arr, cv2.IMREAD_COLOR))
 
 
 @celery_app.task(name="tasks.enroll_face")
-def enroll_face(person_id: str, image_bytes: bytes, next_faiss_id: int):
-    """
-    Enrollment pipeline. Postgres write happens BEFORE FAISS write --
-    durability first, index second. If this task crashes after the
-    Postgres commit but before FAISS add, the recognition path just
-    won't find a match yet; that's recoverable. The reverse order
-    (FAISS first) would risk a vector with no corresponding Postgres
-    row, which is worse -- an orphaned, unexplainable match.
-    """
+async def enroll_face(person_id: str, image_bytes: bytes, next_faiss_id: int):
+    
     image = _decode_image(image_bytes)
     embedding = extract_embedding(image)
-    if embedding is None:
+    if not embedding:
         return {"status": "no_face_detected"}
-
+    
     db = SessionLocal()
     try:
         enrollment = FaceEnrollment(
@@ -50,7 +38,7 @@ def enroll_face(person_id: str, image_bytes: bytes, next_faiss_id: int):
         db.close()
 
     vector_store.add(embedding, faiss_id=next_faiss_id)
-    return {"status": "enrolled", "faiss_index_id": next_faiss_id}
+    return {"status": "Enrolled Face!"}
 
 
 @celery_app.task(name="tasks.recognize_face")
@@ -82,15 +70,20 @@ def recognize_face(image_bytes: bytes):
             .first()
         )
         # Defensive re-check: this is what guards against soft-delete drift.
-        if enrollment is None or not enrollment.is_active:
-            return {"status": "no_match", "reason": "inactive_or_missing_in_postgres"}
+        if enrollment is None or not cast(bool, enrollment.is_active):
+            return {"status": "no_match", "reason": "User is inactive or deleted in the database, present in FAISS"}
+        
+        else:
+            person = db.query(Person).filter(Person.id == enrollment.person_id).first()
+            if not person:
+                return {"status": "no_match", "reason": "Person not found in the database"}
 
-        person = db.query(Person).filter(Person.id == enrollment.person_id).first()
-        return {
-            "status": "matched",
-            "person_id": str(person.id),
-            "full_name": person.full_name,
-            "similarity": similarity,
-        }
+            return {
+                "status": "matched",
+                "person_id": str(person.id),
+                "first_name":person.first_name,
+                "last_name": person.last_name,
+                "similarity": similarity,
+            }
     finally:
         db.close()

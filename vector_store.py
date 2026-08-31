@@ -1,14 +1,10 @@
-"""
-vector_store.py
-Thin wrapper around a FAISS IndexFlatIP. Knows nothing about people,
-organizations, or attendance -- just vectors in, vectors out, by
-integer id. Postgres decides what those ids MEAN.
-"""
+#faiss category, embeddings going in and coming out with postgres using its faiss id
 
 import os
 import threading
 import numpy as np
 import faiss
+from typing import Any, cast
 
 from config import settings
 
@@ -34,14 +30,15 @@ class VectorStore:
         faiss.write_index(self.index, self.path)
 
     def add(self, vector: np.ndarray, faiss_id: int):
-        """vector must already be L2-normalized (cosine via inner product)."""
+        #vector must already be L2-normalized (cosine via inner product).
+
         with _lock:
             v = vector.reshape(1, -1).astype("float32")
             self.index.add_with_ids(v, np.array([faiss_id], dtype="int64"))
             self.save()
 
     def search(self, vector: np.ndarray, top_k: int = 1):
-        """Returns list of (faiss_id, similarity_score), best first."""
+        #Returns list of (faiss_id, similarity_score), best first.
         v = vector.reshape(1, -1).astype("float32")
         scores, ids = self.index.search(v, top_k)
         results = []
@@ -52,9 +49,10 @@ class VectorStore:
         return results
 
     def remove(self, faiss_id: int):
-        """Used on periodic rebuilds to purge soft-deleted vectors."""
+        #Used on periodic rebuilds to purge soft-deleted vectors.
         with _lock:
-            self.index.remove_ids(np.array([faiss_id], dtype="int64"))
+            ids = np.array(faiss_id, dtype="int64")
+            self.index.remove_ids(cast(Any, ids))
             self.save()
 
 
