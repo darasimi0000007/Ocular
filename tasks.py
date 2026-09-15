@@ -18,11 +18,11 @@ def _decode_image(image_bytes: bytes) -> np.ndarray:
 
 
 @celery_app.task(name="tasks.enroll_face")
-async def enroll_face(person_id: str, image_bytes: bytes, next_faiss_id: int):
+def enroll_face(person_id: str, image_bytes: bytes, next_faiss_id: int):
     
-    image = _decode_image(image_bytes)
+    image =  _decode_image(image_bytes)
     embedding = extract_embedding(image)
-    if not embedding:
+    if embedding is None:
         return {"status": "no_face_detected"}
     
     db = SessionLocal()

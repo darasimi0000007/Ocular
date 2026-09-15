@@ -11,7 +11,8 @@ from config import settings
 celery_app = Celery(
     "ocular",
     broker=settings.redis_url,
-    backend=settings.redis_url,
+    backend=settings.redis_url,\
+    include=["tasks"]
 )
 
 celery_app.conf.update(
@@ -24,5 +25,3 @@ celery_app.conf.update(
     worker_concurrency=4,
 )
 
-# Ensures tasks.py gets registered with this app when the worker starts
-celery_app.autodiscover_tasks(["tasks"])
