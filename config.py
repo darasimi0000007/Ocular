@@ -6,6 +6,16 @@ move from local Docker -> staging -> wherever.
 """
 
 from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+SMTP_FROM = os.getenv("SMTP_FROM")
+SMTP_PORT = os.getenv("SMTP_PORT")
+
 
 
 class Settings(BaseSettings):
@@ -33,7 +43,12 @@ class Settings(BaseSettings):
     #secret key for JWT token generation
     secret_key: str = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
 
-
+    # SMTP settings for email sending
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = int(SMTP_PORT) if SMTP_PORT else 587
+    smtp_user: str | None = SMTP_USER
+    smtp_password: str | None = SMTP_PASSWORD
+    smtp_from: str | None = SMTP_FROM
 
 
     @property

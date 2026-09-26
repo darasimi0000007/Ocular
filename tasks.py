@@ -10,13 +10,29 @@ from database import SessionLocal
 from models import FaceEnrollment, Person
 from config import settings
 from typing import Any, cast
+import models
+import build_csv
+import datetime
+import email_service
 
 
+
+
+
+
+#decoding image before enrollment or recognition, image is sent as bytes from the frontend
 def _decode_image(image_bytes: bytes) -> np.ndarray:
     arr = np.frombuffer(image_bytes, dtype=np.uint8)
     return cast(Any, cv2.imdecode(arr, cv2.IMREAD_COLOR))
 
 
+
+
+
+
+
+
+#task for enrolling a face into the database and FAISS index
 @celery_app.task(name="tasks.enroll_face")
 def enroll_face(person_id: str, image_bytes: bytes, next_faiss_id: int):
     
@@ -34,6 +50,7 @@ def enroll_face(person_id: str, image_bytes: bytes, next_faiss_id: int):
         )
         db.add(enrollment)
         db.commit()
+        db.refresh(enrollment)
     finally:
         db.close()
 
@@ -41,14 +58,23 @@ def enroll_face(person_id: str, image_bytes: bytes, next_faiss_id: int):
     return {"status": "Enrolled Face!"}
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+#task for recognizing a face from an image
 @celery_app.task(name="tasks.recognize_face")
 def recognize_face(image_bytes: bytes):
-    """
-    Recognition pipeline. FAISS answers "who looks like this" (similarity),
-    Postgres answers "is that still a valid, active identity" (truth).
-    Never skip the second step -- FAISS keeps deactivated vectors around
-    until the next index rebuild (soft-delete drift).
-    """
+   
     image = _decode_image(image_bytes)
     embedding = extract_embedding(image)
     if embedding is None:
@@ -78,12 +104,71 @@ def recognize_face(image_bytes: bytes):
             if not person:
                 return {"status": "no_match", "reason": "Person not found in the database"}
 
+            #saving attendance record in the database
+            record = models.AttendanceRecord(
+                        person_id=person.id,
+                        matched_similarity=str(similarity),
+                    )
+            db.add(record)
+            db.commit()
+            db.refresh(record)
+    
             return {
                 "status": "matched",
                 "person_id": str(person.id),
-                "first_name":person.first_name,
+                "first_name": person.first_name,
                 "last_name": person.last_name,
                 "similarity": similarity,
             }
+      
+    finally:
+        db.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
+#task for exporting attendance records and emailing it
+@celery_app.task(name="tasks.export_and_email_attendance", bind=True, max_retries=3)
+def export_and_email_attendance(self, moderator_id: int, organization_id: str):
+    db = SessionLocal()
+    try:
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=0)
+
+        records = (
+            db.query(models.AttendanceRecord)
+            .join(Person, Person.id == models.AttendanceRecord.person_id)
+            .filter(Person.organization_id == organization_id)
+            .filter(models.AttendanceRecord.exported_at.is_(None))
+            .filter(models.AttendanceRecord.recorded_at < cutoff)
+            .all()
+        )
+        if records is None:
+            return {"status": "nothing_to_export"}
+
+        csv_bytes = build_csv.build_csv(records)  # group by recorded_at date inside the CSV
+
+        moderator = db.query(models.Moderator).get(moderator_id)
+        if moderator is not None:
+            try:
+                email_service.send_email(to=str(moderator.email), attachment=csv_bytes, filename="attendance_export.csv")
+            except Exception as exc:
+                raise self.retry(exc=exc, countdown=60)
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        db.query(models.AttendanceRecord).filter(
+            models.AttendanceRecord.id.in_([r.id for r in records])
+        ).update({"exported_at": now}, synchronize_session=False)
+        db.commit()
+
+        return {"status": "sent", "count": len(records)}
     finally:
         db.close()

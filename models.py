@@ -62,7 +62,7 @@ class Person(Base):
 
     enrollments = relationship("FaceEnrollment", back_populates="person")
 
-    #mod_link = relationship("Moderator", back_populates="person_link")
+    person_attendance = relationship("AttendanceRecord", back_populates="attendance_person")
 
 
 
@@ -95,9 +95,12 @@ class AttendanceRecord(Base):
     __tablename__ = "attendance_records"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     person_id = Column(UUID(as_uuid=True), ForeignKey("persons.id"), nullable=False)
-    matched_similarity = Column(String)  # store as string/float, your call
+    matched_similarity = Column(Integer)  
     recorded_at = Column(DateTime, server_default=func.now())
+    exported_at = Column(DateTime, nullable=True)  
 
+
+    attendance_person = relationship("Person", back_populates="person_attendance")
 
 
 

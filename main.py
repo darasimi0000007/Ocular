@@ -93,6 +93,16 @@ async def recognize(file: UploadFile, current_moderator: Moderator = Depends(get
 
 
 
+#exporting and emailing attendance
+@app.get("/export_attendance", response_model = TaskAccepted, tags = ["Tasks"])
+async def export_attendance(current_moderator: Moderator = Depends(get_current_moderator)):
+    async_result = tasks.export_and_email_attendance.delay(current_moderator.id, str(current_moderator.organization_id))
+    return TaskAccepted(task_id = async_result.id)
+
+
+
+
+
 
 
 
