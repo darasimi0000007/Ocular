@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:ui' show VoidCallback;
+
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -15,7 +16,8 @@ class ApiException implements Exception {
 
 class Api {
   static String? token;
-  static VoidCallback? onUnauthorized; // set in main.dart -> sends user to Login
+  static VoidCallback?
+  onUnauthorized; // set in main.dart -> sends user to Login
 
   static Future<void> loadToken() async =>
       token = (await SharedPreferences.getInstance()).getString('token');
@@ -39,39 +41,71 @@ class Api {
       onUnauthorized?.call();
     }
     final d = body is Map ? body['detail'] : null;
-    throw ApiException(d is String
-        ? d
-        : d is List
-            ? d.map((e) => e['msg']).join('\n')
-            : 'Error ${r.statusCode}');
+    throw ApiException(
+      d is String
+          ? d
+          : d is List
+          ? d.map((e) => e['msg']).join('\n')
+          : 'Error ${r.statusCode}',
+    );
   }
 
   // POST /signup  (creates org + first moderator)
   static Future<void> signup(Map<String, String> data) async {
-    _handle(await http.post(_u('/signup'),
-        headers: {'Content-Type': 'application/json'}, body: jsonEncode(data)));
-    await (await SharedPreferences.getInstance())
-        .setString('org_slug', data['organization_slug']!);
+    _handle(
+      await http.post(
+        _u('/signup'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
+      ),
+    );
+    await (await SharedPreferences.getInstance()).setString(
+      'org_slug',
+      data['organization_slug']!,
+    );
   }
 
   // POST /auth/login  (OAuth2 form: field is "username" but holds the email)
   static Future<void> login(String email, String password) async {
-    final r = _handle(await http.post(_u('/auth/login'),
-        body: {'username': email, 'password': password})); // Map body => form-encoded
+    final r = _handle(
+      await http.post(
+        _u('/auth/login'),
+        body: {'username': email, 'password': password},
+      ),
+    ); // Map body => form-encoded
     token = r['access_token'];
     await (await SharedPreferences.getInstance()).setString('token', token!);
   }
 
   // POST /organizations/{slug}/moderators
-  static Future<void> addModerator(String slug, Map<String, String> data) async =>
-      _handle(await http.post(_u('/organizations/$slug/moderators'),
-          headers: {'Content-Type': 'application/json'}, body: jsonEncode(data)));
+  static Future<void> addModerator(
+    String slug,
+    Map<String, String> data,
+  ) async => _handle(
+    await http.post(
+      _u('/organizations/$slug/moderators'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(data),
+    ),
+  );
 
   // POST /organizations/persons -> person_id
-  static Future<String> createPerson(String externalId, String first, String last) async {
-    final r = _handle(await http.post(_u('/organizations/persons'),
+  static Future<String> createPerson(
+    String externalId,
+    String first,
+    String last,
+  ) async {
+    final r = _handle(
+      await http.post(
+        _u('/organizations/persons'),
         headers: {..._auth, 'Content-Type': 'application/json'},
-        body: jsonEncode({'external_id': externalId, 'first_name': first, 'last_name': last})));
+        body: jsonEncode({
+          'external_id': externalId,
+          'first_name': first,
+          'last_name': last,
+        }),
+      ),
+    );
     return r['person_id'];
   }
 
@@ -91,8 +125,9 @@ class Api {
       _handle(await _upload('/recognize', filePath))['task_id'];
 
   // GET /export_attendance -> task_id
-  static Future<String> exportAttendance() async =>
-      _handle(await http.get(_u('/export_attendance'), headers: _auth))['task_id'];
+  static Future<String> exportAttendance() async => _handle(
+    await http.get(_u('/export_attendance'), headers: _auth),
+  )['task_id'];
 
   // GET /tasks/{id}, polled until SUCCESS (backend returns 500 on FAILURE -> ApiException)
   static Future<Map> pollTask(String id) async {
